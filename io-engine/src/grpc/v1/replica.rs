@@ -94,6 +94,8 @@ impl From<Lvol> for Replica {
             poolname: l.pool_name(),
             usage: Some(usage.into()),
             allowed_hosts: l.allowed_hosts(),
+            is_clone: false,
+            snapshot_uuid: None,
         }
     }
 }
