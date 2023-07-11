@@ -300,8 +300,15 @@ async fn replica_list(
                     let size = ctx.units(Byte::from_bytes(r.size.into()));
                     let capacity = ctx
                         .units(Byte::from_bytes(usage.capacity_bytes.into()));
-                    let allocated = ctx
-                        .units(Byte::from_bytes(usage.allocated_bytes.into()));
+                    let allocated = if r.is_snapshot {
+                        ctx.units(Byte::from_bytes(
+                            usage.allocated_bytes_snapshots.into(),
+                        ))
+                    } else {
+                        ctx.units(Byte::from_bytes(
+                            usage.allocated_bytes.into(),
+                        ))
+                    };
                     vec![
                         r.poolname.clone(),
                         r.name.clone(),
