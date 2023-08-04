@@ -878,6 +878,51 @@ async fn test_snapshot_referenced_size() {
             2 * cluster_size,
             "Snapshot size doesn't properly reflect wiped superblock"
         );
+        // create snapshots from clone
+        let snap_alloc_before_clone = snap_lvol.usage().allocated_bytes_snapshots;
+        let clone_name = String::from("lvol8_snap2_clone_1");
+        let clone_uuid = Uuid::new_v4().to_string();
+        let source_uuid = snap_lvol.uuid();
+
+        let clone_param = CloneParams::new(
+            Some(clone_name),
+            Some(clone_uuid),
+            Some(source_uuid),
+            Some(Utc::now().to_string()),
+        );
+        let clone1 = snap_lvol
+            .create_clone(clone_param.clone())
+            .await
+            .expect("Failed to create a clone");
+        check_clone(clone1.clone(), clone_param).await;
+
+        let clone_1_snapshot1 = "lvol8_clone_1_snapshot1".to_string();
+        snapshot_params.set_name(clone_1_snapshot1.clone());
+        snapshot_params.set_snapshot_uuid(Uuid::new_v4().to_string());
+        snapshot_params.set_parent_id(clone1.uuid());
+        clone1.clone().create_snapshot(snapshot_params.clone())
+            .await
+            .expect("Failed to create the second snapshot for test volume");
+        bdev_io::write_some("lvol8_snap2_clone_1", 0, 16, 0xccu8)
+            .await
+            .expect("Failed to write data to volume");
+
+        let clone_1_snapshot2 = "lvol8_clone_1_snapshot2".to_string();
+        snapshot_params.set_name(clone_1_snapshot2.clone());
+        snapshot_params.set_snapshot_uuid(Uuid::new_v4().to_string());
+        snapshot_params.set_parent_id(clone1.uuid());
+        clone1.clone().create_snapshot(snapshot_params.clone())
+            .await
+            .expect("Failed to create the second snapshot for test volume");
+        let clone_snap_lvol = find_snapshot_device(&clone_1_snapshot2)
+            .await
+            .expect("Can't lookup snapshot lvol");
+        let x = clone_snap_lvol.usage().allocated_bytes_snapshot_from_clone.unwrap();
+        assert_eq!(
+            x,
+            clone_snap_lvol.usage().allocated_bytes_snapshots - snap_alloc_before_clone,
+            "Clone Snapshot allocated size should not include snapshot created from the original replica before clone"
+        );
     })
     .await;
 }

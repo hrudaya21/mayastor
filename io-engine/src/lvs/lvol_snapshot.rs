@@ -19,6 +19,8 @@ use futures::channel::oneshot;
 use nix::errno::Errno;
 use spdk_rs::libspdk::{
     spdk_blob,
+    spdk_blob_get_num_clusters_ancestors,
+    spdk_bs_get_cluster_size,
     spdk_lvol,
     spdk_xattr_descriptor,
     vbdev_lvol_create_clone_ext,
@@ -750,6 +752,41 @@ impl SnapshotOps for Lvol {
                 }
                 _ => warn!("Pending discarded snapshot destroy failed"),
             }
+        }
+    }
+    /// If snapshot source is a clone, then get the snapshot space usage for the
+    /// parent snapshot from which clone is created.
+    fn calculate_clone_source_snap_usage(&self) -> Option<u64> {
+        if !self.is_snapshot() {
+            return None;
+        }
+        match UntypedBdev::lookup_by_uuid_str(
+            &Lvol::get_blob_xattr(self, SnapshotXattrs::ParentId.name())
+                .unwrap_or_default(),
+        ) {
+            Some(bdev) => match Lvol::try_from(bdev) {
+                Ok(l) => match l.is_snapshot_clone() {
+                    Some(parent_snap_lvol) => unsafe {
+                        let bs = parent_snap_lvol.lvs().blob_store();
+                        let blob = parent_snap_lvol.blob_checked();
+                        let cluster_size = spdk_bs_get_cluster_size(bs);
+                        let num_allocated_clusters_snapshots = {
+                            let mut c: u64 = 0;
+
+                            match spdk_blob_get_num_clusters_ancestors(
+                                bs, blob, &mut c,
+                            ) {
+                                0 => c,
+                                _ => return None,
+                            }
+                        };
+                        Some(num_allocated_clusters_snapshots * cluster_size)
+                    },
+                    None => None,
+                },
+                _ => None,
+            },
+            _ => None,
         }
     }
 }

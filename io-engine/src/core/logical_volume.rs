@@ -3,6 +3,7 @@ use crate::lvs::LvolSpaceUsage;
 ///  LogicalVolume Trait Provide all the Generic Interface for Volume
 pub trait LogicalVolume {
     type InnerPtr;
+    type BlobPtr;
 
     /// Get lvol inner ptr.
     fn as_inner_ptr(&self) -> Self::InnerPtr;
@@ -28,8 +29,8 @@ pub trait LogicalVolume {
     /// Return the size of the Logical Volume in bytes
     fn size(&self) -> u64;
 
-    /// Return the committed size of the Logical Volume in bytes.
-    fn committed(&self) -> u64;
+    /// Get BlobPtr from spdk_lvol.
+    fn blob_checked(&self) -> Self::BlobPtr;
 
     /// Returns Lvol disk space usage
     fn usage(&self) -> LvolSpaceUsage;
