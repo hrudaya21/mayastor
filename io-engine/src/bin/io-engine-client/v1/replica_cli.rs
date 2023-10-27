@@ -10,6 +10,10 @@ use colored_json::ToColoredJson;
 use mayastor_api::{v0 as rpc, v1 as v1_rpc};
 use snafu::ResultExt;
 use tonic::{Code, Status};
+use io_engine::{core::UntypedBdev, lvs::LvsLvol};
+use io_engine::lvs::Lvol;
+use std::convert::TryFrom;
+use core::pin::Pin;
 
 pub fn subcommands<'a, 'b>() -> App<'a, 'b> {
     let create = SubCommand::with_name("create")
@@ -110,6 +114,21 @@ pub fn subcommands<'a, 'b>() -> App<'a, 'b> {
                 .index(1)
                 .help("Replica uuid"),
         );
+    let reserve_cluster = SubCommand::with_name("reserve_cluster")
+        .about("Reserve cluster for replica")
+        .arg(
+            Arg::with_name("uuid")
+                .required(true)
+                .index(1)
+                .help("Replica uuid"),
+        )
+        .arg(
+            Arg::with_name("reserve_cluster_sz")
+                .takes_value(true)
+                .required(true)
+                .value_name("NUMBER")
+                .help("Reserve cluster size")
+        );
     SubCommand::with_name("replica")
         .settings(&[
             AppSettings::SubcommandRequiredElseHelp,
@@ -121,6 +140,7 @@ pub fn subcommands<'a, 'b>() -> App<'a, 'b> {
         .subcommand(destroy)
         .subcommand(share)
         .subcommand(unshare)
+        .subcommand(reserve_cluster)
         .subcommand(SubCommand::with_name("list").about("List replicas"))
         .subcommand(
             SubCommand::with_name("stats").about("IO stats of replicas"),
@@ -137,6 +157,7 @@ pub async fn handler(
         ("list", Some(args)) => replica_list(ctx, args).await,
         ("share", Some(args)) => replica_share(ctx, args).await,
         ("unshare", Some(args)) => replica_unshare(ctx, args).await,
+        ("reserve_cluster", Some(args)) => reserve_cluster(ctx, args).await,
         ("stats", Some(args)) => replica_stat(ctx, args).await,
         (cmd, _) => {
             Err(Status::not_found(format!("command {cmd} does not exist")))
@@ -416,6 +437,46 @@ async fn replica_unshare(
     Ok(())
 }
 
+async fn reserve_cluster(
+    mut ctx: Context,
+    matches: &ArgMatches<'_>,
+) -> crate::Result<()> {
+    let uuid = matches.value_of("uuid").unwrap().to_owned();
+    let reserve_cluster_sz = matches.value_of("reserve_cluster_sz").unwrap().to_owned().parse::<u32>()
+    .unwrap_or(0);
+    
+    // let response = ctx
+    //     .v1
+    //     .replica
+    //     .unshare_replica(v1_rpc::replica::UnshareReplicaRequest {
+    //         uuid,
+    //     })
+    //     .await
+    //     .context(GrpcStatus)?;
+
+    // match ctx.output {
+    //     OutputFormat::Json => {
+    //         println!(
+    //             "{}",
+    //             serde_json::to_string_pretty(&response.get_ref())
+    //                 .unwrap()
+    //                 .to_colored_json_auto()
+    //                 .unwrap()
+    //         );
+    //     }
+    //     OutputFormat::Default => {
+    //         println!("{}", &response.get_ref().uri);
+    //     }
+    let Some(bdev) =  UntypedBdev::lookup_by_uuid_str(uuid.as_str()) else {
+        todo!()
+    };
+    let Ok(mut lvol) = Lvol::try_from(bdev) else {
+        todo!()
+    };
+
+    Pin::new(&mut lvol).reserve_cluster(reserve_cluster_sz as u32).await;
+    Ok(())
+}
 // TODO : There's no v1 rpc for stat.
 async fn replica_stat(
     mut ctx: Context,

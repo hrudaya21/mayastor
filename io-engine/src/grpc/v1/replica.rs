@@ -20,6 +20,8 @@ use mayastor_api::v1::replica::*;
 use nix::errno::Errno;
 use std::{convert::TryFrom, panic::AssertUnwindSafe, pin::Pin};
 use tonic::{Request, Response, Status};
+use spdk_rs::libspdk::spdk_blob_get_num_clusters;
+use spdk_rs::libspdk::spdk_bs_get_cluster_size;
 
 #[derive(Debug, Clone)]
 pub struct ReplicaService {
@@ -220,8 +222,19 @@ impl ReplicaRpc for ReplicaService {
                             }
                         }
                     }
-                    Ok(lvol) => {
-                        debug!("created lvol {:?}", lvol);
+                    Ok(mut lvol) => {
+                        info!("created lvol {:?}", lvol);
+                        let blob = lvol.blob_checked();
+                        let mut num_clusters: u64;
+                        unsafe {
+                            num_clusters = spdk_blob_get_num_clusters(blob);
+                        }
+                        let resize_clusters = num_clusters + 5;
+                        info!("num_clusters: {:?}", num_clusters);
+                        // Pin::new(&mut lvol).resize_blob(resize_clusters as u32).await;
+                        Pin::new(&mut lvol).reserve_cluster(5).await;
+                        // lvol.reserve_cluster(5).await;
+                        Pin::new(&mut lvol).claim_cluster(5).await;
                         Ok(Replica::from(lvol))
                     }
                     Err(e) => Err(e),

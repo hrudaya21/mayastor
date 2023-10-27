@@ -16,6 +16,9 @@ use std::{
 
 use spdk_rs::libspdk::{
     spdk_blob,
+    spdk_blob_resize,
+    spdk_blob_reserve,
+    spdk_blob_claim_reserve,
     spdk_blob_calc_used_clusters,
     spdk_blob_get_num_clusters,
     spdk_blob_get_num_clusters_ancestors,
@@ -592,6 +595,10 @@ pub trait LvsLvol: LogicalVolume + Share {
     /// Wrapper function to destroy replica and its associated snapshot if
     /// replica is identified as last clone.
     async fn destroy_replica(mut self) -> Result<String, Error>;
+
+    async fn reserve_cluster(mut self: Pin<&mut Self>, reserve_cluster_count: u32);
+    async fn claim_cluster(mut self: Pin<&mut Self>, claim_cluster_count: u32);
+    async fn resize_blob(self: Pin<&mut Self>, cluster_sz: u32);
 }
 
 ///  LogicalVolume implement Generic interface for Lvol.
@@ -933,7 +940,6 @@ impl LvsLvol for Lvol {
         if self.is_read_only() {
             warn!("{} is read-only", self.name());
         }
-
         let (s, r) = pair::<i32>();
         unsafe {
             spdk_blob_sync_md(blob, Some(Self::blob_sync_cb), cb_arg(s));
@@ -1021,5 +1027,73 @@ impl LvsLvol for Lvol {
             }
         }
         Ok(name)
+    }
+    /// Reserve cluster for the lvol.
+    async fn reserve_cluster(
+        mut self: Pin<&mut Self>,
+        reserve_cluster_count: u32,
+    ) {
+        extern "C" fn blob_complete_cb(sender_ptr: *mut c_void, errno: i32) {
+            let sender =
+                unsafe { Box::from_raw(sender_ptr as *mut oneshot::Sender<i32>) };
+            sender.send(errno).expect("blob cb receiver is gone");
+        }
+        let blob = self.blob_checked();
+        info!("Reserve Cluster for blob: {:?}, cluster size: {:?}", blob, reserve_cluster_count);
+        let (s, r) = oneshot::channel::<i32>();
+        unsafe {
+            spdk_blob_reserve(
+                blob,
+                reserve_cluster_count,
+                Some(blob_complete_cb),
+                cb_arg(s),
+            )
+        };
+        r.await.expect("Reserve cluster callback is gone");
+        let _ = self.sync_metadata().await;
+    }
+    /// Reserve cluster for the lvol.
+    async fn claim_cluster(
+        mut self: Pin<&mut Self>,
+        claim_cluster_count: u32,
+    ) {
+        extern "C" fn blob_complete_cb(sender_ptr: *mut c_void, errno: i32) {
+            let sender =
+                unsafe { Box::from_raw(sender_ptr as *mut oneshot::Sender<i32>) };
+            sender.send(errno).expect("blob cb receiver is gone");
+        }
+        let blob = self.blob_checked();
+        info!("Claim Cluster for blob: {:?}, cluster size: {:?}", blob, claim_cluster_count);
+        let (s, r) = oneshot::channel::<i32>();
+        unsafe {
+            spdk_blob_claim_reserve(
+                blob,
+                claim_cluster_count,
+                Some(blob_complete_cb),
+                cb_arg(s),
+            )
+        };
+        r.await.expect("Claim cluster callback is gone");
+        let _ = self.sync_metadata().await;
+    }
+    async fn resize_blob(mut self: Pin<&mut Self>, cluster_sz: u32) {
+        extern "C" fn blob_complete_cb(sender_ptr: *mut c_void, errno: i32) {
+            let sender =
+                unsafe { Box::from_raw(sender_ptr as *mut oneshot::Sender<i32>) };
+            sender.send(errno).expect("blob cb receiver is gone");
+        }
+        let blob = self.blob_checked();
+        info!("Resize for blob: {:?}, cluster size: {:?}", blob, cluster_sz);
+        let (s, r) = oneshot::channel::<i32>();
+        unsafe {
+            spdk_blob_resize(
+                blob,
+                cluster_sz.into(),
+                Some(blob_complete_cb),
+                cb_arg(s),
+            )
+        };
+        r.await.expect("Claim cluster callback is gone");
+        let _ = self.sync_metadata().await;
     }
 }
